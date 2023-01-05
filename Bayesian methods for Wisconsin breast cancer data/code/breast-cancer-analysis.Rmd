@@ -1,0 +1,518 @@
+---
+title: "pubh7440-finalProj"
+author: "Zhaoliang Zhou"
+date: "4/23/2022"
+output: html_document
+---
+
+
+# library
+```{r,message=FALSE}
+library(readr)
+library(mombf)
+library(ggplot2)
+library(corrplot)
+library(lares)
+library(gridExtra)
+library(grid)
+library(rstanarm)
+library(bayesplot)
+library(loo)
+library(ROCR)
+```
+
+
+```{r, message=FALSE}
+# for windows
+data <- read_csv("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7440 - Intro to Bayesian/project/data/data.csv")
+
+# for mac
+#data <- read_csv("~/Desktop/PubH7440 - Intro to Baysian/project/data.csv")
+
+bc.df <- data
+```
+
+
+# data manipulation
+```{r}
+summary(bc.df)
+dim(bc.df)
+```
+
+```{r}
+# change respomse to a factor
+bc.df$diagnosis <- as.factor(bc.df$diagnosis)
+```
+
+```{r}
+# remove id, ..33 column
+myvars <- names(bc.df) %in% c("id", "...33")
+bc.df <- bc.df[!myvars]
+```
+
+
+```{r}
+# create another response col malignant
+
+bc.df$malignant <- ifelse(bc.df$diagnosis == "M",1,0)
+```
+
+
+```{r}
+summary(bc.df)
+dim(bc.df)
+```
+
+```{r}
+# create response vector 
+# create covariate matrix
+
+y.bc <- bc.df$malignant
+X.bc.mat <- bc.df[ , 2:31]
+dim(X.bc.mat)
+```
+
+# EDA
+
+```{r}
+data_srz <- as.data.frame(table(bc.df$diagnosis))                  # Summarize data
+data_srz 
+ggplot(data_srz , aes(x = Var1, y = Freq, fill = Var1)) +  # Plot with values on top
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = Freq), vjust = -0.25) +
+  labs(title = "Count table for diagnosis",fill= "Diagnosis", x="Diagnosis")
+  
+```
+texture_mean"         "perimeter_mean"       "concavity_mean"       "concave points_mean"
+
+
+
+```{r}
+p1 <- ggplot(X.bc.mat, aes(x=texture_mean)) + 
+  geom_density(alpha = 0.1)
+p2 <- ggplot(X.bc.mat, aes(x=area_mean)) + 
+  geom_density(alpha = 0.1)
+p3 <- ggplot(X.bc.mat, aes(x=smoothness_mean)) + 
+  geom_density(alpha = 0.1)
+p4 <- ggplot(X.bc.mat, aes(x=compactness_mean)) + 
+  geom_density(alpha = 0.1)
+grid.arrange(p1,p3,p2,p4, ncol=2, nrow=2,
+     top = textGrob("Densities for some selected variables",gp=gpar(fontsize=20,font=3)))
+```
+
+```{r}
+corr_cross(X.bc.mat, # name of dataset
+  max_pvalue = 0.05, # display only significant correlations (at 5% level)
+  top = 10 # display top 10 couples of variables (by correlation coefficient)
+)
+```
+
+
+
+```{r}
+# plot of different nonlocal priors (NLP)
+thseq <- seq(-3,3,length=1000)
+plot(thseq,dmom(thseq,tau=.348),type='l',ylab='Prior density',ylim=c(0,1.2))
+lines(thseq,demom(thseq,tau=.119),lty=2,col=2)
+lines(thseq,dimom(thseq,tau=.133),lty=3,col=4)
+legend('topright',c('MOM','eMOM','iMOM'),lty=1:3,col=c(1,2,4))
+```
+
+
+# variable selection
+
+```{r}
+#set.seed(7440)
+#Default MOM prior on parameters
+#priorCoef <- momprior(taustd=1)
+#priorCoef2 <- imomprior(tau=.133) #iMOM prior for sensitivity
+
+#Beta-Binomial prior for model space
+# alpha=1, beta=1
+#priorDelta <- modelbbprior(1,1)
+
+#mod1 <-  modelSelection(y=y.bc, x=X.bc.mat, 
+#                       priorCoef=priorCoef, 
+#                       priorDelta=priorDelta,
+ #                      family='binomial', 
+  #                     enumerate=FALSE, 
+#                       niter=5000) #MCMC burn=in = round(niter/10)
+#head(postProb(mod1, method = "exact"))
+```
+
+```{r}
+#select.index <- postProb(mod1, method = "exact")$modelid[1]
+#select.index
+```
+
+```{r}
+select.names <- names(X.bc.mat)[c(2,4,5,6,7,8,11,14,16,22,23,24,27,28,29)]
+select.names 
+```
+
+
+
+
+
+# Bayesian GLM 
+Fit logistic regression here
+logistic regression with rstanarm package
+```{r}
+# subset data
+# select only those after VS methods
+myvars2 <- names(bc.df) %in% c(select.names )
+bc.df2 <- bc.df[myvars2]
+dim(bc.df2)
+```
+
+
+
+```{r}
+corrplot(cor(bc.df2) )
+```
+
+```{r}
+bc.df3 <- cbind(bc.df2, y.bc) 
+dim(bc.df3)
+bc.df3$y.bc <- as.factor(bc.df3$y.bc )
+```
+
+```{r}
+# normal prior 
+#t_prior <- student_t(df = 7, location = 0, scale = 2.5)
+fit.stan <- stan_glm(y.bc~., data = bc.df3,
+                 family = binomial(link = "logit"), 
+                 prior = normal(0,1), prior_intercept = normal(0,1), QR=TRUE,
+                 seed = 7440, refresh=0)
+```
+
+```{r}
+pplot<-plot(fit.stan, "areas", prob = 0.95, prob_outer = 1)
+pplot+ geom_vline(xintercept = 0)
+```
+```{r}
+color_scheme_set("red")
+ppc_dens_overlay(y = as.numeric(fit.stan$y),
+                 yrep = posterior_predict(fit.stan, draws = 100))
+```
+
+```{r}
+posterior <- as.array(fit.stan)
+mcmc_areas(
+  posterior, 
+#  pars = c("cyl", "drat", "am", "sigma"),
+  prob = 0.8, # 80% intervals
+  prob_outer = 0.99, # 99%
+  point_est = "mean"
+)
+mcmc_hist(posterior, pars = c("area_mean", "smoothness_mean", "texture_mean", "compactness_mean"))
+
+```
+```{r}
+mcmc_dens_overlay(posterior)
+```
+
+
+
+```{r}
+#color_scheme_set("mix-blue-red")
+#mcmc_trace(posterior, pars = c('concave points_worst', 'concave points_mean'),
+#           facet_args = list(ncol = 4, strip.position = "left"))
+```
+concave points_mean, concave points_worst
+
+
+```{r}
+round(coef(fit.stan), 5)
+```
+
+
+90% intervals 
+
+```{r}
+round(posterior_interval(fit.stan, prob = 0.9), 4)
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+# model with t prior
+
+```{r}
+colnames(bc.df3) <- make.names(colnames(bc.df3))
+
+
+```
+
+```{r}
+t_prior <- student_t(df = 7, location = 0, scale = 2.5)
+fit.stan2 <- stan_glm(y.bc~., data = bc.df3,
+                 family = binomial(link = "logit"), 
+                 prior = t_prior, prior_intercept = t_prior, QR=TRUE,
+                 seed = 7440, refresh=0)
+fit.stan2 
+```
+
+
+```{r}
+round(coef(fit.stan2), 5)
+```
+
+
+90% intervals 
+
+```{r}
+round(posterior_interval(fit.stan2, prob = 0.9), 4)
+
+```
+
+
+```{r}
+color_scheme_set("red")
+ppc_dens_overlay(y = as.numeric(fit.stan2$y),
+                 yrep = posterior_predict(fit.stan2, draws = 100))
+```
+
+```{r}
+posterior2 <- as.array(fit.stan2)
+mcmc_areas(
+  posterior, 
+#  pars = c("cyl", "drat", "am", "sigma"),
+  prob = 0.8, # 80% intervals
+  prob_outer = 0.99, # 99%
+  point_est = "mean"
+)
+mcmc_hist(posterior2, pars = c("area_mean", "smoothness_mean", "texture_mean", "compactness_mean"))
+
+```
+
+```{r}
+mcmc_dens_overlay(posterior2)
+```
+
+
+```{r}
+color_scheme_set("mix-blue-red")
+mcmc_trace(posterior2, pars = c(colnames(bc.df3[-length(colnames(bc.df3))])),
+           facet_args = list(ncol = 3, strip.position = "left"))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+# prediction
+
+make prediction with fit.stan2
+
+```{r}
+(loo1 <- loo(fit.stan2, save_psis = TRUE, k_threshold = 0.7))
+```
+
+```{r}
+fit.stan0 <- update(fit.stan2, formula = y.bc ~ 1, QR = FALSE, refresh=0)
+(loo0 <- loo(fit.stan0))
+loo_compare(loo0, loo1)
+```
+
+```{r}
+# Predicted probabilities
+linpred <- posterior_linpred(fit.stan2)
+preds <- posterior_epred(fit.stan2)
+pred <- colMeans(preds)
+pr <- as.integer(pred >= 0.5)
+   
+# posterior classification accuracy
+mean(xor(pr,as.integer(bc.df3$y.bc==0)))
+```
+
+```{r}
+# LOO predictive probabilities
+ploo=E_loo(preds, loo1$psis_object, type="mean", log_ratios = -log_lik(fit.stan2))$value
+# LOO classification accuracy
+round(mean(xor(ploo>0.5,as.integer(bc.df3$y.bc==0))),5)
+```
+```{r}
+# y-axis LOO predictive probabilities
+# x-axis posterior predictions
+qplot(pred, ploo, main = "Posterior predictive probabilities vs. LOO probabilities",
+      xlab = "Posterior predictive probabilities", 
+      ylab = "LOO probabilities")
+```
+
+
+
+# ROC curve
+
+
+```{r}
+Predctions  <- prediction(pr, bc.df3$y.bc)
+Perf <- performance(Predctions, "tpr", "fpr")
+plot(Perf)
+abline(0, 1, col="grey", lty=2)
+as.numeric(performance(Predctions, "auc")@y.values)
+```
+
+
+
+
+
+
+# LASSO glm
+
+```{r}
+X.mat <- model.matrix(malignant~.-diagnosis, bc.df)[,-1]
+```
+
+```{r}
+library(glmnet)
+cv.lasso <- cv.glmnet(X.mat, y.bc, alpha = 1, family = "binomial")
+# Fit the final model on the training data
+model <- glmnet(X.mat, y.bc, alpha = 1, family = "binomial",
+                lambda = cv.lasso$lambda.min)
+# Display regression coefficients
+coef(model)
+
+```
+
+
+
+```{r}
+# loocv
+
+loocv.vec <- numeric(nrow(bc.df))
+for (i in 1:nrow(bc.df)){
+  train.X = X.mat[-i,]
+  train.y = y.bc[-i]
+  
+  test.x = X.mat[i,]
+  test.y = y.bc[i]
+  
+  cv.lasso <- cv.glmnet(train.X, train.y, alpha = 1, family = "binomial")
+  # Fit the final model on the training data
+  model <- glmnet(train.X, train.y, alpha = 1, family = "binomial",
+                lambda = cv.lasso$lambda.min)
+  preds <- predict(model, newx = test.x, type="class")
+
+  loocv.vec[i] = ifelse(preds == test.y, 1, 0)
+
+
+}
+
+loocv.accuracy = mean(loocv.vec)
+loocv.accuracy
+
+```
+
+lasso loocv: 0.971831
+
+
+
+```{r}
+# train error
+pred.lasso <- predict(model, newx = X.mat, type = "class")
+
+mean(pred.lasso == y.bc)
+
+
+```
+
+```{r}
+# auc
+
+Predctions.lasso  <- prediction(as.numeric(pred.lasso), bc.df3$y.bc)
+Perf.lasso <- performance(Predctions.lasso, "tpr", "fpr")
+plot(Perf.lasso)
+abline(0, 1, col="grey", lty=2)
+as.numeric(performance(Predctions.lasso, "auc")@y.values)
+```
+
+```{r}
+plot(Perf ,main="ROC for Bayesian logsitic and LASSO logistic", col="red", lty=1,lwd = 2.5)
+lines(Perf.lasso@x.values[[1]], Perf.lasso@y.values[[1]], col="blue", lty=2,lwd = 2.5)
+abline(0, 1, col="grey", lty=2)
+legend(0.75, 0.3, legend=c("Bayesian logistic", "Lasso"),
+       col=c("red", "blue"), lty=1:2, cex=0.8)
+```
+# test section
+
+```{r}
+
+set.seed(1234)
+x <- matrix(rnorm(100*3),nrow=100,ncol=3)
+theta <- matrix(c(1,1,0),ncol=1)
+y <- x %*% theta + rnorm(100)
+#Default MOM prior on parameters
+priorCoef <- momprior(taustd=1)
+#Beta-Binomial prior for model space
+priorDelta <- modelbbprior(1,1)
+#Model selection
+
+```
+
+```{r}
+ybin= y>0 
+priorCoef <- momprior(taustd=1)
+
+fit2 <- modelSelection(ybin, x, 
+                       priorCoef=priorCoef, 
+                       priorDelta=priorDelta,
+                       family='binomial', 
+                       enumerate=FALSE, 
+                       niter=1000) 
+postProb(fit2)
+
+```
+
+
+
+
+
+
+# Links
+
+https://avehtari.github.io/modelselection/diabetes.html
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
