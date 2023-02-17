@@ -1,0 +1,347 @@
+---
+title: "doc-analysis-final"
+author: "Zhaoliang Zhou"
+date: "4/21/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+
+```{r, message=FALSE}
+library(glmnet)
+library(coefplot)
+library(ROCR)
+library(gbm)
+library(e1071)
+library(nnet)
+library(pls)
+library("ridge")
+library("sva")
+library("car")
+library("preprocessCore")
+library("ROCR")
+```
+
+# Data processing
+```{r}
+setwd("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper")
+```
+
+```{r}
+
+source("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/code/calcPhenotype_funcs.R")
+
+
+
+source("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/scripts/summarizeGenesByMean.R")
+
+source("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/scripts/homogenize_data.R")
+
+source("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/scripts/do_variable_selection.R")
+
+```
+
+
+```{r}
+load(file="C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/Data/GdscProcData/gdsc_brainarray_syms.RData")
+
+load(file="C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/Data/docetaxelData/doce_rma_syms_brainArray.RData")
+
+
+```
+
+```{r}
+###################################################
+### code chunk number 5: docetaxelBreastCancer.Snw:42-46
+###################################################
+sensDoce <- read.csv("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/Data/docetaxelData/sensitivity_data_for_drug_1007.csv",
+as.is=TRUE)
+doceic50s <- sensDoce$"IC.50"
+names(doceic50s) <- sensDoce$"Cell.Line.Name"
+```
+
+
+```{r}
+###################################################
+### code chunk number 6: docetaxelBreastCancer.Snw:50-58
+###################################################
+pData <- read.delim("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/Data/GdscPdata/E-MTAB-783.sdrf.txt", as.is=TRUE)
+```
+
+```{r}
+pDataUnique <- pData[pData$Source.Name %in% names(which(table(pData$Source.Name) 
+== 1)), ]
+
+rownames(pDataUnique) <- pDataUnique$Source.Name
+commonCellLines <- rownames(pDataUnique)[rownames(pDataUnique) %in% names(doceic50s)]
+pDataUniqueOrd <- pDataUnique[commonCellLines, ]
+doceic50sOrd <- doceic50s[commonCellLines]
+trainDataOrd <- gdsc_brainarray_syms[, pDataUniqueOrd$"Array.Data.File"]
+```
+
+
+
+
+# ridge (paper)
+```{r}
+predictedSensitivity_ridge1 <- calcPhenotype_ridge(doceVivoNorm_syms, trainDataOrd, doceic50sOrd, 
+selection=1)
+```
+```{r}
+t.test(predictedSensitivity_ridge1[1:10], predictedSensitivity_ridge1[11:24], alternative="less")
+```
+
+```{r}
+pred_ridge1 <- prediction(predictedSensitivity_ridge1, c(rep("sens", 10), rep("res", 14)), 
+label.ordering=c("sens", "res"))
+perf_ridge1 <- performance(pred_ridge1, measure = "tpr", x.measure = "fpr")
+print(paste("AUC:", performance(pred_ridge1, measure = "auc")@"y.values"[[1]]))
+
+
+
+plot(perf_ridge1, main="(b)")
+abline(0, 1, col="grey", lty=2)
+```
+
+
+
+# ridge (glmnet)
+```{r}
+set.seed(99)
+predictedSensitivity_ridge2 <- calcPhenotype_ridge_glmnet(doceVivoNorm_syms, trainDataOrd, doceic50sOrd, 
+selection=1)
+```
+
+```{r}
+t.test(predictedSensitivity_ridge2[1:10], predictedSensitivity_ridge2[11:24], alternative="less")
+```
+
+```{r}
+pred_ridge2 <- prediction(predictedSensitivity_ridge2, c(rep("sens", 10), rep("res", 14)), 
+label.ordering=c("sens", "res"))
+
+perf_ridge2 <- performance(pred_ridge2, measure = "tpr", x.measure = "fpr")
+print(paste("AUC:", performance(pred_ridge2, measure = "auc")@"y.values"[[1]]))
+
+
+
+plot(perf_ridge2, main="(b)")
+abline(0, 1, col="grey", lty=2)
+```
+
+
+
+# lasso 
+
+```{r}
+set.seed(99)
+predictedSensitivity_lasso <- calcPhenotype_lasso(doceVivoNorm_syms, trainDataOrd, doceic50sOrd, 
+selection=1)
+```
+
+```{r}
+predictedSensitivity_lasso$preds
+
+```
+
+```{r}
+t.test(predictedSensitivity_lasso$preds[1:10], predictedSensitivity_lasso$preds[11:24], alternative="less")
+```
+
+
+```{r}
+pred_lasso <- prediction(predictedSensitivity_lasso$preds, c(rep("sens", 10), rep("res", 14)), 
+label.ordering=c("sens", "res"))
+perf_lasso <- performance(pred_lasso, measure = "tpr", x.measure = "fpr")
+print(paste("AUC:", performance(pred_lasso, measure = "auc")@"y.values"[[1]]))
+
+
+
+plot(perf_lasso, main="(b)")
+abline(0, 1, col="grey", lty=2)
+```
+
+
+
+```{r}
+# print top 5 non-zero coeffs
+head(predictedSensitivity_lasso$coeffs)
+cat("the number of non-zero coefficients is:", length(predictedSensitivity_lasso$coeffs$coefs))
+```
+
+
+```{r}
+predictedSensitivity_lasso$coeffs$features
+```
+
+# elestic net
+
+```{r}
+set.seed(99)
+predictedSensitivity_enet <- calcPhenotype_enet(doceVivoNorm_syms, trainDataOrd, doceic50sOrd, 
+selection=1)
+```
+
+```{r}
+t.test(predictedSensitivity_enet[1:10], predictedSensitivity_enet[11:24], alternative="less")
+```
+
+
+
+```{r}
+pred_enet <- prediction(predictedSensitivity_enet, c(rep("sens", 10), rep("res", 14)), 
+label.ordering=c("sens", "res"))
+perf_enet <- performance(pred_enet, measure = "tpr", x.measure = "fpr")
+print(paste("AUC:", performance(pred_enet, measure = "auc")@"y.values"[[1]]))
+
+
+
+plot(perf_enet, main="(b)")
+abline(0, 1, col="grey", lty=2)
+```
+
+
+
+
+
+
+# SVM 
+```{r}
+set.seed(99)
+predictedSensitivity_svm <- calcPhenotype_svm(doceVivoNorm_syms, trainDataOrd, doceic50sOrd, 
+selection=1)
+```
+
+```{r}
+t.test(predictedSensitivity_svm[1:10], predictedSensitivity_svm[11:24], alternative="less")
+```
+
+
+```{r}
+pred_svm <- prediction(predictedSensitivity_svm, c(rep("sens", 10), rep("res", 14)), 
+label.ordering=c("sens", "res"))
+perf_svm <- performance(pred_svm, measure = "tpr", x.measure = "fpr")
+print(paste("AUC:", performance(pred_svm, measure = "auc")@"y.values"[[1]]))
+
+
+
+plot(perf_svm, main="(b)")
+abline(0, 1, col="grey", lty=2)
+```
+
+
+# ANN
+
+
+subset the trainDataOrd to those selected by LASSO
+```{r}
+# lasso selected variables
+lasso_select_vars <- c(predictedSensitivity_lasso$coeffs$features)
+
+# remove intercept
+lasso_select_vars <-  lasso_select_vars[-1]
+lasso_select_vars
+length(lasso_select_vars)
+```
+
+```{r}
+trainDataOrd_subset <- trainDataOrd[rownames(trainDataOrd) %in% lasso_select_vars, ]  # Extract rows from data
+dim(trainDataOrd_subset)                                                # Print data frame subset
+```
+
+```{r}
+set.seed(99)
+predictedSensitivity_ann <- calcPhenotype_ann(doceVivoNorm_syms, trainDataOrd_subset, doceic50sOrd, 
+selection=1)
+```
+
+```{r}
+predictedSensitivity_ann
+```
+
+
+```{r}
+t.test(predictedSensitivity_ann[1:10], predictedSensitivity_ann[11:24], alternative="less")
+```
+
+
+
+
+```{r}
+pred_ann <- prediction(predictedSensitivity_ann, c(rep("sens", 10), rep("res", 14)), 
+label.ordering=c("sens", "res"))
+perf_ann <- performance(pred_ann, measure = "tpr", x.measure = "fpr")
+print(paste("AUC:", performance(pred_ann, measure = "auc")@"y.values"[[1]]))
+
+
+
+plot(perf_ann, main="(b)")
+abline(0, 1, col="grey", lty=2)
+```
+
+
+
+
+
+
+
+# PCR 
+
+```{r}
+set.seed(99)
+predictedSensitivity_pcr <- calcPhenotype_pcr(doceVivoNorm_syms, 
+                                              trainDataOrd, 
+                                              doceic50sOrd, 
+                                              selection=1,
+                                              Ncomp=10)
+predictedSensitivity_pcr
+```
+
+
+
+```{r}
+t.test(predictedSensitivity_pcr[1:10], predictedSensitivity_pcr[11:24], alternative="less")
+```
+
+
+
+
+```{r}
+pred_pcr <- prediction(predictedSensitivity_pcr[1:24], c(rep("sens", 10), rep("res", 14)), 
+label.ordering=c("sens", "res"))
+perf_pcr <- performance(pred_pcr, measure = "tpr", x.measure = "fpr")
+print(paste("AUC:", performance(pred_pcr, measure = "auc")@"y.values"[[1]]))
+
+
+
+plot(perf_pcr, main="(b)")
+abline(0, 1, col="grey", lty=2)
+```
+
+
+
+
+# ROC curves plots
+
+
+1st set of plots: ridge, lasso, elestic net
+```{r}
+plot(perf_ridge2 ,main="ROC for ridge, lasso, and elastic net", col="red", lty=1,lwd = 2.5)
+lines(perf_lasso@x.values[[1]], perf_lasso@y.values[[1]], col="blue", lty=2,lwd = 2.5)
+lines(perf_enet@x.values[[1]], perf_enet@y.values[[1]], col="darkorange1", lty=3,lwd = 2.5)
+abline(0, 1, col="grey", lty=2)
+legend(0.8, 0.4, legend=c("ridge", "lasso","elastic net"),
+       col=c("red", "blue","darkorange1"), lty=1:3, cex=0.8)
+```
+
+part 2: svm, ann, pcr
+```{r}
+plot(perf_svm ,main="ROC for SVM, ANN, and PCR", col="red", lty=1,lwd = 2.5)
+lines(perf_ann@x.values[[1]], perf_ann@y.values[[1]], col="blue", lty=2,lwd = 2.5)
+lines(perf_pcr@x.values[[1]], perf_pcr@y.values[[1]], col="green", lty=3,lwd = 2.5)
+abline(0, 1, col="grey", lty=2)
+legend(0.8, 0.4, legend=c("svm", "ANN","PCR"),
+       col=c("red", "blue","green"), lty=1:3, cex=0.8)
+```
+

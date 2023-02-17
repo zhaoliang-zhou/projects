@@ -1,0 +1,104 @@
+---
+title: "cisp-analysis-final"
+author: "Zhaoliang Zhou"
+date: "4/24/2022"
+output: html_document
+---
+
+```{r}
+library("ridge")
+library("sva")
+library("car")
+library("preprocessCore")
+library("ROCR")
+
+
+###################################################
+### code chunk number 3: cisplatinBreastCancer.Snw:25-29
+###################################################
+source("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/scripts/compute_phenotype_function.R")
+source("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/scripts/summarizeGenesByMean.R")
+source("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/scripts/homogenize_data.R")
+source("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/scripts/do_variable_selection.R")
+
+
+###################################################
+### code chunk number 4: cisplatinBreastCancer.Snw:33-35
+###################################################
+load(file="C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/Data/GdscProcData/gdsc_brainarray_syms.RData")
+load(file="C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/Data/cisplatinData/cisplatinBreast.RData")
+```
+
+```{r}
+
+###################################################
+### code chunk number 5: cisplatinBreastCancer.Snw:39-49
+###################################################
+sensCis <- read.csv("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/Data/cisplatinData/sensitivity_data_for_drug_1005.csv", as.is=TRUE)
+cisic50s <- sensCis$"IC.50"
+names(cisic50s) <- sensCis$"Cell.Line.Name"
+pData <- read.delim("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/Data/GdscPdata/E-MTAB-783.sdrf.txt", as.is=TRUE)
+pDataUnique <- pData[pData$Source.Name %in% names(which(table(pData$Source.Name) == 1)), ]
+rownames(pDataUnique) <- pDataUnique$Source.Name
+commonCellLines <- rownames(pDataUnique)[rownames(pDataUnique) %in% names(cisic50s)]
+pDataUniqueOrd <- pDataUnique[commonCellLines, ]
+cisic50sOrd <- cisic50s[commonCellLines]
+trainDataOrd <- gdsc_brainarray_syms[, pDataUniqueOrd$"Array.Data.File"]
+```
+
+```{r}
+
+###################################################
+### code chunk number 6: cisplatinBreastCancer.Snw:53-54
+###################################################
+newPtype <- calcPhenotype(cisVivoNorm_syms, trainDataOrd, cisic50sOrd, selection=1)
+
+newPtype
+```
+
+```{r}
+###################################################
+### code chunk number 7: cisplatinBreastCancer.Snw:59-63
+###################################################
+l <- list(cCR=newPtype[respOrd=="cCR"], cPR=newPtype[respOrd=="cPR"],  SD=newPtype[respOrd=="SD"], PD=newPtype[respOrd=="PD"])
+boxplot(l, outline=FALSE, border="grey", ylab="Predicted Sensitivity (log(IC50)",
+main="(a)")
+stripchart(l, vertical=TRUE, pch=20, method="jitter", add=TRUE)
+
+```
+
+```{r}
+###################################################
+### code chunk number 8: cisplatinBreastCancer.Snw:68-72
+###################################################
+respVar <- c(rep(0, length(l[["cCR"]])), rep(1, length(l[["cPR"]])), rep(2, length(l[["SD"]])), rep(3, length(l[["PD"]])))
+predResp <- c(l[["cCR"]], l[["cPR"]], l[["SD"]], l[["PD"]])
+summary(lm(predResp~respVar))
+sapply(l, median)
+```
+
+```{r}
+
+###################################################
+### code chunk number 9: cisplatinBreastCancer.Snw:77-79
+###################################################
+loocvOut <- predictionAccuracyByCv(cisVivoNorm_syms, trainDataOrd, cisic50sOrd)
+cor.test(loocvOut$cvPtype, loocvOut$realPtype)
+
+```
+
+
+```{r}
+
+pred111 <- prediction(newPtype , c(rep("sens", 10), rep("res", 14)), 
+label.ordering=c("sens", "res"))
+perf111 <- performance(pred111 , measure = "tpr", x.measure = "fpr")
+print(paste("AUC:", performance(pred111, measure = "auc")@"y.values"[[1]]))
+
+```
+```{r}
+plot(perf111)
+abline(0, 1, col="grey", lty=2)
+
+```
+

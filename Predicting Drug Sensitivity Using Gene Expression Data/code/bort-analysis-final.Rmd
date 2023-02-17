@@ -1,0 +1,416 @@
+---
+title: "bort-analysis-final"
+author: "Zhaoliang Zhou"
+date: "4/24/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+```{r}
+###################################################
+library("ridge")
+library("sva")
+library("car")
+library("preprocessCore")
+library("ROCR")
+library("GEOquery")
+library(glmnet)
+library(coefplot)
+library(ROCR)
+library(gbm)
+library(e1071)
+library(nnet)
+library(pls)
+
+###################################################
+### code chunk number 4: bortezomib.Snw:31-36
+###################################################
+scriptsDir <- "C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/scripts"
+source(file.path(scriptsDir, "compute_phenotype_function.R"))
+source(file.path(scriptsDir, "summarizeGenesByMean.R"))
+source(file.path(scriptsDir, "homogenize_data.R"))
+source(file.path(scriptsDir, "do_variable_selection.R"))
+
+source("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/code/calcPhenotype_funcs.R")
+```
+
+```{r}
+
+###################################################
+### code chunk number 5: bortezomib.Snw:42-44
+###################################################
+load("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/Data/bortezomibData/bortGeo.RData") # loads the geo data "bortezomib_mas5"
+# bortezomib_mas5 <- getGEO("GSE9782") # uncomment this line to download the data directly from GEO.
+
+
+###################################################
+### code chunk number 6: bortezomib.Snw:49-57
+###################################################
+exprDataU133a <- cbind(exprs(bortezomib_mas5[[1]]), exprs(bortezomib_mas5[[2]]))
+bortIndex <- c(which(pData(phenoData(bortezomib_mas5[[1]]))[,"characteristics_ch1.1"] == "treatment = PS341"), 255 + which(pData(phenoData(bortezomib_mas5[[2]]))[,"characteristics_ch1.1"] == "treatment = PS341"))
+dexIndex <- c(which(pData(phenoData(bortezomib_mas5[[1]]))[,"characteristics_ch1.1"] == "treatment = Dex"), 255 + which(pData(phenoData(bortezomib_mas5[[2]]))[,"characteristics_ch1.1"] == "treatment = Dex"))
+studyIndex <- c(as.character(pData(bortezomib_mas5[[1]])[, "characteristics_ch1"]), as.character(pData(bortezomib_mas5[[2]])[, "characteristics_ch1"]))
+
+# exprDataU133a <- exprs(bortezomib_mas5[[1]])
+# bortIndex <- which(pData(phenoData(bortezomib_mas5[[1]]))[,"characteristics_ch1.1"] == "treatment = PS341")
+# dexIndex <- which(pData(phenoData(bortezomib_mas5[[1]]))[,"characteristics_ch1.1"] == "treatment = Dex")
+```
+
+
+```{r}
+###################################################
+### code chunk number 7: bortezomib.Snw:63-71
+###################################################
+library("hgu133a.db") # version 2.8.0
+x <- hgu133aSYMBOL
+mapped_probes <- mappedkeys(x)
+names(mapped_probes) <- as.character(x[mapped_probes])
+affy2sym <- as.character(x[mapped_probes])
+sym2affy <- affy2sym
+names(sym2affy) <- names(affy2sym)
+rownames(exprDataU133a) <- sym2affy[rownames(exprDataU133a)]
+```
+
+```{r}
+
+###################################################
+### code chunk number 8: bortezomib.Snw:76-77
+###################################################
+load(file="C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/Data/GdscProcData/gdsc_brainarray_syms.RData")
+
+
+###################################################
+### code chunk number 9: bortezomib.Snw:84-90
+###################################################
+sensBortezomib <- read.csv("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/Data/bortezomibData/sensitivity_data_for_drug_104.csv", 
+as.is=TRUE)
+bortic50s <- sensBortezomib$"IC.50"
+names(bortic50s) <- sensBortezomib$"Cell.Line.Name"
+tissue <- sensBortezomib$"Tissue"
+names(tissue) <- sensBortezomib$"Cell.Line.Name"
+```
+
+```{r}
+
+###################################################
+### code chunk number 10: bortezomib.Snw:96-104
+###################################################
+pData <- read.delim("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/Data/GdscPdata/E-MTAB-783.sdrf.txt", as.is=TRUE)
+pDataUnique <- pData[pData$Source.Name %in% names(which(table(pData$Source.Name) ==
+1)), ]
+rownames(pDataUnique) <- pDataUnique$Source.Name
+commonCellLines <- rownames(pDataUnique)[rownames(pDataUnique) %in% names(bortic50s)]
+pDataUniqueOrd <- pDataUnique[commonCellLines, ]
+bortic50sOrd <- bortic50s[commonCellLines]
+trainDataOrd <- gdsc_brainarray_syms[, pDataUniqueOrd$"Array.Data.File"]
+
+
+###################################################
+### code chunk number 11: bortezomib.Snw:110-111
+###################################################
+print(sum(grep("myeloma", sensBortezomib$Tissue), ignore.case=TRUE))
+```
+
+```{r}
+
+###################################################
+### code chunk number 12: bortezomib.Snw:117-119
+###################################################
+predictedSensitivity133a <- calcPhenotype(exprDataU133a[, bortIndex], trainDataOrd, bortic50sOrd,
+selection=1)
+
+#predictedSensitivity133a
+
+```
+
+```{r}
+###################################################
+### code chunk number 13: bortezomib.Snw:125-129
+###################################################
+resp133a <- c(as.character(pData(bortezomib_mas5[[1]])[, "characteristics_ch1.8"]),
+as.character(pData(bortezomib_mas5[[2]])[, "characteristics_ch1.8"]))[bortIndex]
+t.test(predictedSensitivity133a[resp133a == "PGx_Responder = NR"],
+predictedSensitivity133a[resp133a == "PGx_Responder = R"], alternative="greater")
+```
+
+```{r}
+###################################################
+### code chunk number 14: fig4aPlot
+###################################################
+lTwoa <- list("Responder"=predictedSensitivity133a[resp133a == "PGx_Responder = R"],
+"Non-responder"=predictedSensitivity133a[resp133a == "PGx_Responder = NR"])
+boxplot(lTwoa, outline=FALSE, border="grey", ylab="Predicted Sensitivity (log(IC50)",
+main="(a)")
+stripchart(lTwoa, vertical=TRUE, pch=20, method="jitter", add=TRUE)
+```
+
+```{r}
+
+###################################################
+### code chunk number 15: fig3a
+###################################################
+lTwoa <- list("Responder"=predictedSensitivity133a[resp133a == "PGx_Responder = R"],
+"Non-responder"=predictedSensitivity133a[resp133a == "PGx_Responder = NR"])
+boxplot(lTwoa, outline=FALSE, border="grey", ylab="Predicted Sensitivity (log(IC50)",
+main="(a)")
+stripchart(lTwoa, vertical=TRUE, pch=20, method="jitter", add=TRUE)
+
+```
+
+```{r}
+
+predA <- prediction(c(lTwoa[[1]], lTwoa[[2]]), c(rep("sens", length(lTwoa[[1]])), 
+rep("res", length(lTwoa[[2]]))), label.ordering=c("sens", "res"))
+perfA <- performance(predA, measure = "tpr", x.measure = "fpr")
+print(paste("AUC:", performance(predA, measure = "auc")@"y.values"[[1]]))
+plot(perfA)
+abline(0, 1, col="grey", lty=2)
+```
+
+
+
+
+
+
+# ridge (glmnet)
+```{r}
+set.seed(99)
+#predictedSensitivity_ridge2 <- calcPhenotype_ridge_glmnet(doceVivoNorm_syms, trainDataOrd, doceic50sOrd, 
+#selection=1)
+
+predictedSensitivity133a_ridge2 <- calcPhenotype_ridge_glmnet(exprDataU133a[, bortIndex], 
+                                                              trainDataOrd, 
+                                                              bortic50sOrd,
+                                                              selection=1)
+#predictedSensitivity133a_ridge2
+```
+
+
+
+
+```{r}
+lTwoa_ridge2 <- list("Responder"=predictedSensitivity133a_ridge2[resp133a == "PGx_Responder = R"],
+"Non-responder"=predictedSensitivity133a_ridge2[resp133a == "PGx_Responder = NR"])
+
+predA_ridge2 <- prediction(c(lTwoa_ridge2[[1]], lTwoa_ridge2[[2]]), c(rep("sens", length(lTwoa_ridge2[[1]])), 
+rep("res", length(lTwoa_ridge2[[2]]))), label.ordering=c("sens", "res"))
+
+perfA_ridge2 <- performance(predA_ridge2, measure = "tpr", x.measure = "fpr")
+
+print(paste("AUC:", performance(predA_ridge2, measure = "auc")@"y.values"[[1]]))
+plot(perfA_ridge2)
+abline(0, 1, col="grey", lty=2)
+```
+
+
+
+
+
+
+
+# lasso 
+```{r}
+set.seed(99)
+#predictedSensitivity_ridge2 <- calcPhenotype_ridge_glmnet(doceVivoNorm_syms, trainDataOrd, doceic50sOrd, 
+#selection=1)
+
+predictedSensitivity133a_lasso <- calcPhenotype_lasso(exprDataU133a[, bortIndex], 
+                                                              trainDataOrd, 
+                                                              bortic50sOrd,
+                                                              selection=1)
+predictedSensitivity133a_lasso1 <- predictedSensitivity133a_lasso$preds
+head(predictedSensitivity133a_lasso$coeffs)
+```
+
+
+
+
+```{r}
+lTwoa_lasso <- list("Responder"=predictedSensitivity133a_lasso1[resp133a == "PGx_Responder = R"],
+"Non-responder"=predictedSensitivity133a_lasso1[resp133a == "PGx_Responder = NR"])
+
+predA_lasso <- prediction(c(lTwoa_lasso[[1]], lTwoa_lasso[[2]]), c(rep("sens", length(lTwoa_lasso[[1]])), 
+rep("res", length(lTwoa_lasso[[2]]))), label.ordering=c("sens", "res"))
+
+perfA_lasso <- performance(predA_lasso, measure = "tpr", x.measure = "fpr")
+
+print(paste("AUC:", performance(predA_lasso, measure = "auc")@"y.values"[[1]]))
+plot(perfA_lasso)
+abline(0, 1, col="grey", lty=2)
+```
+
+
+# elastic net 
+```{r}
+set.seed(99)
+#predictedSensitivity_ridge2 <- calcPhenotype_ridge_glmnet(doceVivoNorm_syms, trainDataOrd, doceic50sOrd, 
+#selection=1)
+
+predictedSensitivity133a_enet <- calcPhenotype_enet(exprDataU133a[, bortIndex], 
+                                                              trainDataOrd, 
+                                                              bortic50sOrd,
+                                                              selection=1)
+#predictedSensitivity133a_enet
+```
+
+
+
+
+```{r}
+lTwoa_enet <- list("Responder"=predictedSensitivity133a_enet[resp133a == "PGx_Responder = R"],
+"Non-responder"=predictedSensitivity133a_enet[resp133a == "PGx_Responder = NR"])
+
+predA_enet <- prediction(c(lTwoa_enet[[1]], lTwoa_enet[[2]]), c(rep("sens", length(lTwoa_enet[[1]])), 
+rep("res", length(lTwoa_enet[[2]]))), label.ordering=c("sens", "res"))
+
+perfA_enet <- performance(predA_enet, measure = "tpr", x.measure = "fpr")
+
+print(paste("AUC:", performance(predA_enet, measure = "auc")@"y.values"[[1]]))
+plot(perfA_enet)
+abline(0, 1, col="grey", lty=2)
+```
+
+
+# svm 
+```{r}
+set.seed(99)
+#predictedSensitivity_ridge2 <- calcPhenotype_ridge_glmnet(doceVivoNorm_syms, trainDataOrd, doceic50sOrd, 
+#selection=1)
+
+predictedSensitivity133a_svm <- calcPhenotype_svm(exprDataU133a[, bortIndex], 
+                                                              trainDataOrd, 
+                                                              bortic50sOrd,
+                                                              selection=1)
+#predictedSensitivity133a_svm
+```
+
+
+
+
+```{r}
+lTwoa_svm <- list("Responder"=predictedSensitivity133a_svm[resp133a == "PGx_Responder = R"],
+"Non-responder"=predictedSensitivity133a_svm[resp133a == "PGx_Responder = NR"])
+
+predA_svm <- prediction(c(lTwoa_svm[[1]], lTwoa_svm[[2]]), c(rep("sens", length(lTwoa_svm[[1]])), 
+rep("res", length(lTwoa_svm[[2]]))), label.ordering=c("sens", "res"))
+
+perfA_svm <- performance(predA_svm, measure = "tpr", x.measure = "fpr")
+
+print(paste("AUC:", performance(predA_svm, measure = "auc")@"y.values"[[1]]))
+plot(perfA_svm)
+abline(0, 1, col="grey", lty=2)
+```
+
+
+# ann 
+```{r}
+# lasso selected variables
+lasso_select_vars2 <- c(predictedSensitivity133a_lasso$coeffs$features)
+
+# remove intercept
+lasso_select_vars2 <-  lasso_select_vars2[-1]
+lasso_select_vars2
+length(lasso_select_vars2)
+```
+
+```{r}
+trainDataOrd_subset2 <- trainDataOrd[rownames(trainDataOrd) %in% lasso_select_vars2, ]  # Extract rows from data
+dim(trainDataOrd_subset2)                                                # Print data frame subset
+```
+
+
+
+
+```{r}
+set.seed(99)
+#predictedSensitivity_ridge2 <- calcPhenotype_ridge_glmnet(doceVivoNorm_syms, trainDataOrd, doceic50sOrd, 
+#selection=1)
+
+predictedSensitivity133a_ann <- calcPhenotype_ann(exprDataU133a[, bortIndex], 
+                                                              trainDataOrd_subset2, 
+                                                              bortic50sOrd,
+                                                              selection=1)
+#predictedSensitivity133a_svm
+```
+
+
+```{r}
+lTwoa_ann <- list("Responder"=predictedSensitivity133a_ann[resp133a == "PGx_Responder = R"],
+"Non-responder"=predictedSensitivity133a_ann[resp133a == "PGx_Responder = NR"])
+
+predA_ann <- prediction(c(lTwoa_ann[[1]], lTwoa_ann[[2]]), c(rep("sens", length(lTwoa_ann[[1]])), 
+rep("res", length(lTwoa_ann[[2]]))), label.ordering=c("sens", "res"))
+
+perfA_ann <- performance(predA_ann, measure = "tpr", x.measure = "fpr")
+
+print(paste("AUC:", performance(predA_ann, measure = "auc")@"y.values"[[1]]))
+plot(perfA_ann)
+abline(0, 1, col="grey", lty=2)
+```
+
+
+# pcr
+```{r}
+set.seed(99)
+#predictedSensitivity_ridge2 <- calcPhenotype_ridge_glmnet(doceVivoNorm_syms, trainDataOrd, doceic50sOrd, 
+#selection=1)
+
+predictedSensitivity133a_pcr <- calcPhenotype_pcr(exprDataU133a[, bortIndex], 
+                                                              trainDataOrd, 
+                                                              bortic50sOrd,
+                                                              selection=1,
+                                                              Ncomp=150)
+#predictedSensitivity133a_svm
+```
+
+
+
+
+```{r}
+lTwoa_pcr <- list("Responder"=predictedSensitivity133a_pcr[resp133a == "PGx_Responder = R"],
+"Non-responder"=predictedSensitivity133a_pcr[resp133a == "PGx_Responder = NR"])
+
+predA_pcr <- prediction(c(lTwoa_pcr[[1]], lTwoa_pcr[[2]]), c(rep("sens", length(lTwoa_pcr[[1]])), 
+rep("res", length(lTwoa_pcr[[2]]))), label.ordering=c("sens", "res"))
+
+perfA_pcr <- performance(predA_pcr, measure = "tpr", x.measure = "fpr")
+
+print(paste("AUC:", performance(predA_pcr, measure = "auc")@"y.values"[[1]]))
+plot(perfA_pcr)
+abline(0, 1, col="grey", lty=2)
+```
+
+
+
+
+# roc curves
+
+1st set of plots: ridge, lasso, elestic net
+```{r}
+plot(perfA_ridge2 ,main="AUC for ridge, lasso, and elastic net", col="red", lty=1,lwd = 2.5)
+lines(perfA_lasso@x.values[[1]], perfA_lasso@y.values[[1]], col="blue", lty=2,lwd = 2.5)
+lines(perfA_enet@x.values[[1]], perfA_enet@y.values[[1]], col="darkorange1", lty=3,lwd = 2.5)
+abline(0, 1, col="grey", lty=2)
+legend(0.8, 0.4, legend=c("ridge", "lasso","elastic net"),
+       col=c("red", "blue","darkorange1"), lty=1:3, cex=0.8)
+```
+
+part 2: svm, ann, pcr
+```{r}
+plot(perfA_svm ,main="AUC for SVM, ANN, and PCR", col="red", lty=1,lwd = 2.5)
+lines(perfA_ann@x.values[[1]], perfA_ann@y.values[[1]], col="blue", lty=2,lwd = 2.5)
+lines(perfA_pcr@x.values[[1]], perfA_pcr@y.values[[1]], col="green", lty=3,lwd = 2.5)
+abline(0, 1, col="grey", lty=2)
+legend(0.8, 0.4, legend=c("svm", "ANN","PCR"),
+       col=c("red", "blue","green"), lty=1:3, cex=0.8)
+```
+
+
+
+
+
+
+
+
+
+

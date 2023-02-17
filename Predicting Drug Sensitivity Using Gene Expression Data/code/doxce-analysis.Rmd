@@ -1,0 +1,455 @@
+---
+title: "decetaaxel-analysis"
+author: "Zhaoliang Zhou"
+date: "4/17/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+
+
+```{r}
+library(glmnet)
+library(coefplot)
+library(ROCR)
+library(gbm)
+library(e1071)
+library(nnet)
+```
+
+```{r}
+setwd("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper")
+```
+
+```{r}
+source("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/scripts/homogenize_data.R")
+```
+
+
+```{r}
+load(file="C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/Data/GdscProcData/gdsc_brainarray_syms.RData")
+
+load(file="C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/Data/docetaxelData/doce_rma_syms_brainArray.RData")
+
+
+```
+
+```{r}
+###################################################
+### code chunk number 5: docetaxelBreastCancer.Snw:42-46
+###################################################
+sensDoce <- read.csv("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/Data/docetaxelData/sensitivity_data_for_drug_1007.csv",
+as.is=TRUE)
+doceic50s <- sensDoce$"IC.50"
+names(doceic50s) <- sensDoce$"Cell.Line.Name"
+```
+
+
+```{r}
+###################################################
+### code chunk number 6: docetaxelBreastCancer.Snw:50-58
+###################################################
+pData <- read.delim("C:/Users/leonz/Desktop/UMN/Spring 2022/PubH 7475 - Statistical Learnign and Data mining/final project/paper/paper/Data/GdscPdata/E-MTAB-783.sdrf.txt", as.is=TRUE)
+```
+
+```{r}
+pDataUnique <- pData[pData$Source.Name %in% names(which(table(pData$Source.Name) 
+== 1)), ]
+
+rownames(pDataUnique) <- pDataUnique$Source.Name
+commonCellLines <- rownames(pDataUnique)[rownames(pDataUnique) %in% names(doceic50s)]
+pDataUniqueOrd <- pDataUnique[commonCellLines, ]
+doceic50sOrd <- doceic50s[commonCellLines]
+trainDataOrd <- gdsc_brainarray_syms[, pDataUniqueOrd$"Array.Data.File"]
+```
+
+
+```{r}
+dat1 <- t(trainDataOrd)
+dim(dat1)
+```
+
+```{r}
+length(pDataUniqueOrd$Characteristics.CellLine.)
+```
+
+
+# ridge 
+
+
+```{r}
+homdata <- homogenizeData(doceVivoNorm_syms, trainDataOrd, selection = 2)
+```
+
+
+
+
+
+```{r}
+ridge_cv <- cv.glmnet(t(homdata$train), doceic50sOrd)
+# Best lambda value
+best_lambda <- ridge_cv$lambda.min
+best_lambda
+
+```
+
+
+```{r}
+best_ridge <- glmnet(t(homdata$train), doceic50sOrd, alpha = 0, lambda = best_lambda)
+```
+
+
+
+
+```{r}
+preds <- predict(best_ridge, newx = t(homdata$test) )
+preds
+length(preds)
+```
+
+```{r}
+t.test(preds[1:10], preds[11:24], alternative="less")
+```
+```{r}
+stripchart(list("Sensitive in vivo"=preds[1:10], 
+"Resistant in vivo"=preds[11:24]), vertical=TRUE, 
+method="jitter", pch=20, ylab="Predicted Sensitivity (log(IC50))", main="(a)")
+
+```
+```{r}
+pred <- prediction(preds, c(rep("sens", 10), rep("res", 14)), 
+label.ordering=c("sens", "res"))
+perf <- performance(pred, measure = "tpr", x.measure = "fpr")
+print(paste("AUC:", performance(pred, measure = "auc")@"y.values"[[1]]))
+
+```
+```{r}
+plot(perf, main="(b)")
+abline(0, 1, col="grey", lty=2)
+```
+
+
+# LASSO
+```{r}
+lasso_cv <- cv.glmnet(t(homdata$train), doceic50sOrd, alpha = 1)
+# Best lambda value
+best_lambda <- lasso_cv$lambda.min
+best_lambda
+```
+
+
+```{r}
+best_lasso <- glmnet(t(homdata$train), doceic50sOrd, alpha = 1, lambda =best_lambda)
+```
+
+
+
+
+```{r}
+preds_lasso <- predict(best_lasso , newx = t(homdata$test) )
+preds_lasso
+length(preds_lasso)
+```
+
+
+```{r}
+t.test(preds_lasso[1:10], preds_lasso[11:24], alternative="less")
+```
+
+```{r}
+stripchart(list("Sensitive in vivo"=preds_lasso[1:10], 
+"Resistant in vivo"=preds_lasso[11:24]), vertical=TRUE, 
+method="jitter", pch=20, ylab="Predicted Sensitivity (log(IC50))", main="(a)")
+
+```
+
+```{r}
+
+pred <- prediction(preds_lasso, c(rep("sens", 10), rep("res", 14)), 
+label.ordering=c("sens", "res"))
+perf <- performance(pred, measure = "tpr", x.measure = "fpr")
+print(paste("AUC:", performance(pred, measure = "auc")@"y.values"[[1]]))
+
+```
+
+```{r}
+plot(perf, main="(b)")
+abline(0, 1, col="grey", lty=2)
+```
+
+```{r}
+## Adapted from @Mehrad Mahmoudian:
+myCoefs <- coef(best_lasso, s="lambda.min");
+
+## Asseble into a data.frame
+myResults <- data.frame(
+  features = myCoefs@Dimnames[[1]][ which(myCoefs != 0 ) ], #intercept included
+  coefs    = myCoefs              [ which(myCoefs != 0 ) ]  #intercept included
+)
+myResults
+```
+
+
+
+# random forest
+```{r}
+library(randomForest)
+```
+
+```{r}
+doc.train.df <- as.data.frame(cbind(doceic50sOrd,t(homdata$train)))
+```
+
+
+```{r}
+colnames(doc.train.df)[1]
+```
+
+```{r}
+sum(colnames(doc.train.df) == "DTX2P1-UPK3BP1-PMS2P11")
+```
+
+
+```{r}
+names(doc.train.df ) <- make.names(names(doc.train.df ))
+```
+
+```{r}
+rf.mod <- randomForest(doceic50sOrd~., data = doc.train.df, ntree=100, nodesize=10, importance = T)
+```
+
+
+```{r}
+varImpPlot(rf.mod)
+```
+```{r}
+doc.test.df <- as.data.frame(t(homdata$test))
+
+names(doc.test.df) <- make.names(names(doc.test.df ))
+```
+
+```{r}
+preds_rf <- predict(rf.mod , newdata = doc.test.df )
+preds_rf
+length(preds_rf)
+```
+
+
+
+
+```{r}
+t.test(preds_rf[1:10], preds_rf [11:24], alternative="less")
+```
+
+
+
+```{r}
+
+pred_rf <- prediction(preds_rf, c(rep("sens", 10), rep("res", 14)), 
+label.ordering=c("sens", "res"))
+perf <- performance(pred_rf, measure = "tpr", x.measure = "fpr")
+print(paste("AUC:", performance(pred_rf, measure = "auc")@"y.values"[[1]]))
+
+```
+
+
+```{r}
+plot(perf, main="(b)")
+abline(0, 1, col="grey", lty=2)
+```
+
+
+
+
+# gbm 
+```{r}
+library(gbm)
+```
+
+```{r}
+gbm.mod <- gbm(doceic50sOrd~., data = doc.train.df, distribution = "gaussian", n.trees = 100, shrinkage = 0.01)
+```
+
+
+```{r}
+preds_gbm <- predict(gbm.mod  , newdata = doc.test.df )
+preds_gbm
+length(preds_gbm)
+```
+
+```{r}
+
+pred_gbm <- prediction(preds_gbm , c(rep("sens", 10), rep("res", 14)), 
+label.ordering=c("sens", "res"))
+perf <- performance(pred_gbm , measure = "tpr", x.measure = "fpr")
+print(paste("AUC:", performance(pred_gbm, measure = "auc")@"y.values"[[1]]))
+
+```
+
+```{r}
+t.test(preds_gbm[1:10], preds_gbm[11:24], alternative="less")
+```
+
+
+
+# svm 
+
+
+```{r}
+svm.mod <- svm(doceic50sOrd~., data = doc.train.df)
+summary(svm.mod)
+```
+
+```{r}
+mod.tune <- tune.svm(doceic50sOrd~., data = doc.train.df)
+```
+
+```{r}
+mod.tune$best.model$gamma
+mod.tune$best.model$cost
+
+```
+```{r}
+svm.mod <- svm(doceic50sOrd~., data = doc.train.df, gamma = mod.tune$best.model$gamma, 
+               cost = mod.tune$best.model$cost)
+```
+
+```{r}
+preds_svm <- predict(svm.mod  , newdata = doc.test.df )
+preds_svm
+length(preds_svm)
+```
+
+
+```{r}
+
+pred_svm <- prediction(preds_svm , c(rep("sens", 10), rep("res", 14)), 
+label.ordering=c("sens", "res"))
+perf <- performance(pred_svm , measure = "tpr", x.measure = "fpr")
+print(paste("AUC:", performance(pred_svm, measure = "auc")@"y.values"[[1]]))
+
+```
+```{r}
+plot(perf)
+abline(0, 1, col="grey", lty=2)
+
+```
+
+
+
+```{r}
+t.test(preds_svm[1:10], preds_svm[11:24], alternative="less")
+```
+
+
+# NN
+
+artificial NN 
+
+```{r}
+ann.mod <- nnet(doceic50sOrd~.,size=2, decay=0.01,
+                 MaxNWts = 2e4,
+                data = doc.train.df)
+summary(ann.mod)
+```
+
+```{r}
+ann.out <- tune.nnet(doceic50sOrd~AADAC+AAK1, size = 1:10,
+                    decay = c(0, 0.01, .1),
+                data = doc.train.df)
+ann.out$best.parameters$size
+ann.out$best.parameters$decay
+
+```
+
+```{r}
+preds_ann <- predict(ann.mod, doc.test.df )
+preds_ann
+length(preds_svm)
+```
+
+
+```{r}
+
+pred_ann <- prediction(preds_ann , c(rep("sens", 10), rep("res", 14)), 
+label.ordering=c("sens", "res"))
+perf <- performance(pred_ann , measure = "tpr", x.measure = "fpr")
+print(paste("AUC:", performance(pred_ann, measure = "auc")@"y.values"[[1]]))
+```
+
+
+```{r}
+plot(perf, main="(b)")
+abline(0, 1, col="grey", lty=2)
+```
+
+
+# PCR 
+
+
+```{r}
+library(pls)
+```
+
+```{r}
+pcr_model <- pcr(doceic50sOrd~AADAC+AAK1, data = as.data.frame(doc.train.df), scale = TRUE, validation = "CV")
+#summary(pcr_model)
+```
+
+
+
+
+```{r}
+
+validationplot(pcr_model)
+```
+```{r}
+predplot(pcr_model)
+```
+```{r}
+validationplot(pcr_model, val.type="MSEP")
+
+```
+```{r}
+pcr_pred <- predict(pcr_model, as.data.frame(doc.test.df[,colnames(doc.test.df) %in% c("AADAC","AAK1")]), ncomp = 5)
+pcr_pred
+pcr_pred[1:24]
+```
+
+```{r}
+
+pred_pcr <- prediction(pcr_pred[1:24] , c(rep("sens", 10), rep("res", 14)), label.ordering=c("sens", "res"))
+perf_pcr <- performance(pred_pcr , measure = "tpr", x.measure = "fpr")
+print(paste("AUC:", performance(pred_pcr, measure = "auc")@"y.values"[[1]]))
+```
+
+
+```{r}
+plot(perf_pcr, main="(b)")
+abline(0, 1, col="grey", lty=2)
+```
+
+# Check section 
+```{r}
+length(doceic50sOrd)
+```
+
+```{r}
+dim(t(homdata$train))
+```
+
+
+
+
+
+
+```{r}
+dim(doc.train.df)
+```
+
+
+
+
+
+
