@@ -1,0 +1,16 @@
+coding links:
+3https://www.kaggle.com/datasets/uciml/pima-indians-diabetes-database/data
+
+https://www.amazon.com/Bayesian-Analysis-Python-Practical-probabilistic/dp/1805127160/ref=tmm_pap_swatch_0?link_from_packtlink=yes
+
+https://www.pymc.io/projects/examples/en/latest/howto/Missing_Data_Imputation.html#conclusion
+
+https://towardsdatascience.com/bayesian-logistic-regression-with-pymc3-8e17c576f31a
+https://gist.github.com/tabacof/8cba9680b11eb28455cf
+https://austinrochford.com/posts/2013-09-02-prior-distributions-for-bayesian-regression-using-pymc.html
+https://goldinlocks.github.io/Bayesian-logistic-regression-with-pymc3/
+https://towardsdatascience.com/bayesian-logistic-regression-with-pymc3-8e17c576f31a
+https://www.pymc.io/projects/examples/en/latest/howto/Missing_Data_Imputation.html#bayesian-imputation
+
+
+Reference links: 
